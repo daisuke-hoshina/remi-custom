@@ -1,0 +1,20 @@
+__pycache__/
+.vscode/
+.ipynb_checkpoints/
+.DS_Store
+miditoolkit.egg-info/
+@eaDir
+*.pyc
+*.pypirc
+Thumbs.db
+*.gz
+
+# REMI specific large files and generated data
+REMI-tempo-checkpoint/
+REMI-tempo-chord-checkpoint/
+data/
+result/
+result2/
+*.pkl
+*.midi
+.gemini/
