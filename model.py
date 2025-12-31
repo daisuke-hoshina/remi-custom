@@ -12,8 +12,10 @@ class PopMusicTransformer(object):
     ########################################
     def __init__(self, checkpoint, is_training=False):
         # load dictionary
+        print("DEBUG: Loading dictionary...")
         self.dictionary_path = '{}/dictionary.pkl'.format(checkpoint)
         self.event2word, self.word2event = pickle.load(open(self.dictionary_path, 'rb'))
+        print(f"DEBUG: Dictionary loaded. Size: {len(self.event2word)}")
         # model settings
         self.x_len = 512
         self.mem_len = 512
@@ -33,17 +35,21 @@ class PopMusicTransformer(object):
         else:
             self.batch_size = 1
         self.checkpoint_path = '{}/model'.format(checkpoint)
+        print("DEBUG: Calling load_model...")
         self.load_model()
+        print("DEBUG: load_model execution finished.")
 
     ########################################
     # load model
     ########################################
     def load_model(self):
+        print("DEBUG: load_model start. Creating placeholders...")
         # placeholders
         self.x = tf.compat.v1.placeholder(tf.int32, shape=[self.batch_size, None])
         self.y = tf.compat.v1.placeholder(tf.int32, shape=[self.batch_size, None])
         self.mems_i = [tf.compat.v1.placeholder(tf.float32, [self.mem_len, self.batch_size, self.d_model]) for _ in range(self.n_layer)]
         # model
+        print("DEBUG: Building graph...")
         self.global_step = tf.compat.v1.train.get_or_create_global_step()
         initializer = tf.compat.v1.initializers.random_normal(stddev=0.02, seed=None)
         proj_initializer = tf.compat.v1.initializers.random_normal(stddev=0.01, seed=None)
@@ -78,6 +84,7 @@ class PopMusicTransformer(object):
                 untie_r=False,
                 proj_same_dim=True)
         self.avg_loss = tf.reduce_mean(loss)
+        print("DEBUG: Graph built. Creating optimizer/saver...")
         # vars
         all_vars = tf.compat.v1.trainable_variables()
         grads = tf.gradients(self.avg_loss, all_vars)
@@ -95,8 +102,11 @@ class PopMusicTransformer(object):
         self.saver = tf.compat.v1.train.Saver()
         config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
+        print("DEBUG: Creating session...")
         self.sess = tf.compat.v1.Session(config=config)
+        print(f"DEBUG: Restoring checkpoint from {self.checkpoint_path}...")
         self.saver.restore(self.sess, self.checkpoint_path)
+        print("DEBUG: Restore complete.")
 
     ########################################
     # temperature sampling
@@ -134,7 +144,7 @@ class PopMusicTransformer(object):
     ########################################
     # generate
     ########################################
-    def generate(self, n_target_bar, temperature, topk, output_path, prompt=None):
+    def generate(self, n_target_bar, temperature, topk, output_path, prompt=None, initial_chord=None, initial_bpm=None):
         # if prompt, load it. Or, random start
         if prompt:
             events = self.extract_events(prompt)
@@ -149,16 +159,58 @@ class PopMusicTransformer(object):
                     tempo_values = [v for k, v in self.event2word.items() if 'Tempo Value' in k]
                     chords = [v for k, v in self.event2word.items() if 'Chord' in k]
                     ws.append(self.event2word['Position_1/16'])
-                    ws.append(np.random.choice(chords))
+                    
+                    # Chord
+                    if initial_chord:
+                         ws.append(self.event2word['Chord_{}'.format(initial_chord)])
+                    else:
+                        ws.append(np.random.choice(chords))
+                    
                     ws.append(self.event2word['Position_1/16'])
-                    ws.append(np.random.choice(tempo_classes))
-                    ws.append(np.random.choice(tempo_values))
+                    
+                    # Tempo
+                    if initial_bpm:
+                        if initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[0]:
+                            ws.append(self.event2word['Tempo Class_slow'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[0].start)])
+                        elif initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[1]:
+                            ws.append(self.event2word['Tempo Class_mid'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[1].start)])
+                        elif initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[2]:
+                            ws.append(self.event2word['Tempo Class_fast'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[2].start)])
+                        elif initial_bpm < utils.DEFAULT_TEMPO_INTERVALS[0].start:
+                            ws.append(self.event2word['Tempo Class_slow'])
+                            ws.append(self.event2word['Tempo Value_0'])
+                        elif initial_bpm > utils.DEFAULT_TEMPO_INTERVALS[2].stop:
+                            ws.append(self.event2word['Tempo Class_fast'])
+                            ws.append(self.event2word['Tempo Value_59'])
+                    else:
+                        ws.append(np.random.choice(tempo_classes))
+                        ws.append(np.random.choice(tempo_values))
                 else:
                     tempo_classes = [v for k, v in self.event2word.items() if 'Tempo Class' in k]
                     tempo_values = [v for k, v in self.event2word.items() if 'Tempo Value' in k]
                     ws.append(self.event2word['Position_1/16'])
-                    ws.append(np.random.choice(tempo_classes))
-                    ws.append(np.random.choice(tempo_values))
+                    if initial_bpm:
+                        if initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[0]:
+                            ws.append(self.event2word['Tempo Class_slow'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[0].start)])
+                        elif initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[1]:
+                            ws.append(self.event2word['Tempo Class_mid'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[1].start)])
+                        elif initial_bpm in utils.DEFAULT_TEMPO_INTERVALS[2]:
+                            ws.append(self.event2word['Tempo Class_fast'])
+                            ws.append(self.event2word['Tempo Value_{}'.format(initial_bpm-utils.DEFAULT_TEMPO_INTERVALS[2].start)])
+                        elif initial_bpm < utils.DEFAULT_TEMPO_INTERVALS[0].start:
+                            ws.append(self.event2word['Tempo Class_slow'])
+                            ws.append(self.event2word['Tempo Value_0'])
+                        elif initial_bpm > utils.DEFAULT_TEMPO_INTERVALS[2].stop:
+                            ws.append(self.event2word['Tempo Class_fast'])
+                            ws.append(self.event2word['Tempo Value_59'])
+                    else:
+                        ws.append(np.random.choice(tempo_classes))
+                        ws.append(np.random.choice(tempo_values))
                 words.append(ws)
         # initialize mem
         batch_m = [np.zeros((self.mem_len, self.batch_size, self.d_model), dtype=np.float32) for _ in range(self.n_layer)]
@@ -194,6 +246,11 @@ class PopMusicTransformer(object):
             # if bar event (only work for batch_size=1)
             if word == self.event2word['Bar_None']:
                 current_generated_bar += 1
+                print(f"DEBUG: Generated Bar {current_generated_bar}/{n_target_bar}")
+            
+            if len(words[0]) % 100 == 0:
+                print(f"DEBUG: Generated {len(words[0])} tokens. Current Bar: {current_generated_bar}")
+            
             # re-new mem
             batch_m = _new_mem
         # write
